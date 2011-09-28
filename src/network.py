@@ -32,11 +32,11 @@ timestep = 0.1
 p.setup(timestep = timestep)
 
 data_list = []
-data_list.append(scp.loadmat('bootstrap_joe093-3-C3-MO.mat'))
-data_list.append(scp.loadmat('bootstrap_joe108-7-C3-MO(1).mat'))
-data_list.append(scp.loadmat('bootstrap_joe112-5-C3-MO.mat'))
-data_list.append(scp.loadmat('bootstrap_joe112-6-C3-MO.mat'))
-data_list.append(scp.loadmat('bootstrap_joe145-4-C3-MO.mat'))
+data_list.append(scp.loadmat('../data/bootstrap_joe093-3-C3-MO.mat'))
+data_list.append(scp.loadmat('../data/bootstrap_joe108-7-C3-MO(1).mat'))
+data_list.append(scp.loadmat('../data/bootstrap_joe112-5-C3-MO.mat'))
+data_list.append(scp.loadmat('../data/bootstrap_joe112-6-C3-MO.mat'))
+data_list.append(scp.loadmat('../data/bootstrap_joe145-4-C3-MO.mat'))
 
 data = []
 
