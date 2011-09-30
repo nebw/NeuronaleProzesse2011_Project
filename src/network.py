@@ -1,5 +1,3 @@
-
-
 '''
 Created on 28.09.2011
 
@@ -9,17 +7,21 @@ import scipy.io as scp
 import numpy as np
 import pylab as pl
 import pyNN.neuron as p
-import random
 import copy
 
 #=================CONFIG=================#
 runtime = 2000.
 timestep = 0.1
 maxchange = 0.005
-choosen_directions = [1,2]
+choosen_directions = [0,1,2,3,4,5]
 trial_sequence = range(0,30) 
 test_sequence = range(30,35)
-initial_weights = [6.4083333333333332, 16.208333333333332, 5.375, 22.5, 16.375]
+data_set_config = 'average'
+if data_set_config == 'peak':
+    initial_weights = [6.4083333333333332, 16.208333333333332, 5.375, 22.5, 16.375]
+elif data_set_config == 'average':
+    initial_weights = [23.916666666666668, 13.416666666666666, 18.091666666666665, 5.083333333333333, 21.541666666666668]
+
 #========================================#
 
 def get_proportional_weight(mean, firing_rate, maxdiff):
@@ -60,19 +62,25 @@ def print_weight_list(weight_list):
 
 p.setup(timestep = timestep)
 
-data_list = []
-data_list.append(scp.loadmat('../data/bootstrap_joe093-3-C3-MO.mat'))
-data_list.append(scp.loadmat('../data/bootstrap_joe108-7-C3-MO(1).mat'))
-data_list.append(scp.loadmat('../data/bootstrap_joe112-5-C3-MO.mat'))
-data_list.append(scp.loadmat('../data/bootstrap_joe112-6-C3-MO.mat'))
-data_list.append(scp.loadmat('../data/bootstrap_joe145-4-C3-MO.mat'))
+def load_data(data_set):
+    data_list = []
 
-#data_list = []
-#data_list.append(scp.loadmat('data2/bootstrap_joe097-5-C3-MO.mat'))
-#data_list.append(scp.loadmat('data2/bootstrap_joe108-4-C3-MO.mat'))
-#data_list.append(scp.loadmat('data2/bootstrap_joe108-7-C3-MO.mat'))
-#data_list.append(scp.loadmat('data2/bootstrap_joe147-1-C3-MO.mat'))
-#data_list.append(scp.loadmat('data2/bootstrap_joe151-1-C3-MO.mat'))
+    if data_set == 'peak':
+        data_list.append(scp.loadmat('../data_peak/bootstrap_joe093-3-C3-MO.mat'))
+        data_list.append(scp.loadmat('../data_peak/bootstrap_joe108-7-C3-MO(1).mat'))
+        data_list.append(scp.loadmat('../data_peak/bootstrap_joe112-5-C3-MO.mat'))
+        data_list.append(scp.loadmat('../data_peak/bootstrap_joe112-6-C3-MO.mat'))
+        data_list.append(scp.loadmat('../data_peak/bootstrap_joe145-4-C3-MO.mat'))
+    elif data_set == 'average':
+        data_list.append(scp.loadmat('../data_av/bootstrap_joe097-5-C3-MO.mat'))
+        data_list.append(scp.loadmat('../data_av/bootstrap_joe108-4-C3-MO.mat'))
+        data_list.append(scp.loadmat('../data_av/bootstrap_joe108-7-C3-MO.mat'))
+        data_list.append(scp.loadmat('../data_av/bootstrap_joe147-1-C3-MO.mat'))
+        data_list.append(scp.loadmat('../data_av/bootstrap_joe151-1-C3-MO.mat'))
+
+    return data_list
+
+data_list = load_data(data_set_config)
 
 data = []
 for list in data_list:
@@ -82,7 +90,11 @@ for list in data_list:
         trial_list = []
         direction_list.append(trial_list)
         for trial in range(1,36):
-            trial_list.append(list['GDFcell'][0][direction][list['GDFcell'][0][direction][:,0] == trial][:,1])
+            if data_set_config == 'peak':
+                trial_list.append(list['GDFcell'][0][direction][list['GDFcell'][0][direction][:,0] == trial][:,1])
+            elif data_set_config == 'average':
+                trial_list.append([elem + 1000 for elem in (list['GDFcell'][0][direction][list['GDFcell'][0][direction][:,0] == trial][:,1])])
+
 
 # create direction population
 dir_list = []
@@ -114,7 +126,7 @@ input_list = create_input_list()
 output_firing_rates = [0] * len(choosen_directions)
 
 all_firing_rates = [[],[],[],[],[],[]]
-average_firing_rates = [6.4083333333333332, 16.208333333333332, 5.375, 22.5, 16.375]
+average_firing_rates = copy.deepcopy(initial_weights)
 
 flag_projection = True
 proj_list = []
@@ -184,22 +196,22 @@ for trial_id in trial_sequence:
         for input_id, weight in enumerate(weight_list):
             firing_rate = input_firing_rates[input_id]
             value = firing_rate - average_firing_rates[input_id]
-            #value += 2
+            value += 1
             if value > 0:
                 if id == highest_output_index:
                     for syn_id, synapse in enumerate(weight):
                         if syn_id == highest_output_index:
                             newWeight = weight[syn_id] + value * maxchange
                         else:
-                            newWeight = weight[syn_id] - 0.1 * value * maxchange
+                            newWeight = weight[syn_id] - 0.2 * value * maxchange
                         if newWeight > 0.001 and newWeight < 1.:
                             weight[syn_id] = newWeight
                 else:
                     for syn_id, synapse in enumerate(weight):
                         if syn_id == highest_output_index:
-                            newWeight = weight[syn_id] - 2 * value * maxchange
+                            newWeight = weight[syn_id] - 2.0 * value * maxchange
                         else:
-                            newWeight = weight[syn_id] + 0.1 * value * maxchange
+                            newWeight = weight[syn_id] + 0.5 * value * maxchange
                         if newWeight > 0.001 and newWeight < 1.:
                             weight[syn_id] = newWeight
 
