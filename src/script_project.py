@@ -5,7 +5,10 @@ import pylab as plt
 import pyNN.neuron as p
 
 def exercise1():
-    # 1.
+    ''' this function gives a visualization of the whole data set
+    scatter plots for the different neurons and directions, as well as the mean spikes druing the timeline and the estimated fring rate (by a kernel convolution, window of width 100)''' 
+    
+    #load data1.
     a1 = scipy.io.loadmat('bootstrap_joe093-3-C3-MO.mat')
     a2 = scipy.io.loadmat('bootstrap_joe108-7-C3-MO.mat')
     a3 = scipy.io.loadmat('bootstrap_joe112-5-C3-MO.mat')
@@ -17,7 +20,9 @@ def exercise1():
     data4 = a4["GDFcell"][0]
     data5 = a5["GDFcell"][0]
     
+    # here the binary spike trains of the neurons are stored, for every neuron and every direction
     binary = plt.zeros((5, 6, 2000))
+    # and here the spike times, for every neuron, every direction and every trial
     spike_times = [[[[]*1]*35]*6]*5
     for i in plt.arange(5): #neuron
         exec "%s=%s" % ('data', 'data' + str(i+1))
@@ -46,6 +51,7 @@ def exercise1():
                   for l in (spike_times[i][j][k-1]+999):
                       if l < 2000:
                           binary[i][j][l] += 1
+                  # plots the scatter plots
                   plt.plot(data[j][indi,1], plt.ones(data[j][indi,1].shape[0])*k, 'b|')
               plt.title('direction'+str(j+1))
               plt.xlabel('time [ms]')    
@@ -57,12 +63,15 @@ def exercise1():
                  tick.label1.set_fontsize(8)
         fig.savefig('neuron'+str(i+1)+'spikes',format='png')
 
-    S = binary
-    # 12_3
+    
+    # this is the definition of the kernel
     w = 100
     h = 1./w
     k = plt.ones((w,)) * h
+    
+    # normalization by the number of trials
     binary = binary/35.
+    
     for i in plt.arange(5):
         fig = plt.figure()
         ax=plt.axes([0,0,1,1]);circ=plt.Circle((0.5,0.48),radius=0.051,edgecolor='k',LineStyle='solid',facecolor='w');ax.add_patch(circ);plt.text(0.453,0.465,'Neuron ' + str(i+1))
@@ -81,10 +90,13 @@ def exercise1():
                 ax=plt.axes([.1,.3,.3,.1])
               elif j==5:
                 ax=plt.axes([.1,.55,.3,.1])
+              # plots the mean spikes along the timeline of the experiment
               plt.plot(plt.arange(-1000,1000),binary[i][j])
               plt.ylabel('mean spikes')
               plt.hold(True)
               ax2=ax.twinx()
+              
+              # plots the estimated firing rate on a different y axis
               plt.plot(plt.arange(-1000,1000),plt.convolve(binary[i][j], k, mode='same'),'g')
               plt.title('direction'+str(j+1))
               plt.xlabel('time [ms]')    

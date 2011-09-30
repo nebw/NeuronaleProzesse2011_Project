@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Created on 28.09.2011
 
@@ -7,28 +8,43 @@ import scipy.io as scp
 import numpy as np
 import pylab as pl
 import pyNN.neuron as p
+import random
 import copy
+import visualization
+import sys
 
-#=================CONFIG=================#
+#########CONFIG#######################################################################################################
+
 runtime = 2000.
 timestep = 0.1
-maxchange = 0.005
-choosen_directions = [0,1,2,3,4,5]
+maxchange = 0.001
+#maxchange = 0.005
+weight_change_limit = 1
+weight_limit_min = 0.001
+weight_limit_max = 1.
+debug = False
+#choosen_directions = [1,2,4,5]
+choosen_directions = [4,5]
 trial_sequence = range(0,30) 
 test_sequence = range(30,35)
-data_set_config = 'average'
+number_of_training_phases = 2
+data_set_config = 'peak'
 if data_set_config == 'peak':
     initial_weights = [6.4083333333333332, 16.208333333333332, 5.375, 22.5, 16.375]
 elif data_set_config == 'average':
     initial_weights = [23.916666666666668, 13.416666666666666, 18.091666666666665, 5.083333333333333, 21.541666666666668]
 
-#========================================#
+#########/CONFIG######################################################################################################
 
-def get_proportional_weight(mean, firing_rate, maxdiff):
-    return ((firing_rate - mean) * maxchange / maxdiff)
+def dPrint(str):
+    '''print debug output only if debug flag is true'''
+    
+    if debug:
+      print str
 
 def get_sorted_spike_train(id, direction, trial_id):
-    #print "sort: ", id, ", ", direction,", ", trial_id
+    '''sort spike train times in order to suppress warnings'''
+    
     sorted_spike_train = data[id][direction][trial_id]
     sorted_spike_train.sort()
     return sorted_spike_train
@@ -36,8 +52,7 @@ def get_sorted_spike_train(id, direction, trial_id):
 
 def create_input_list():
     ''' 5 input populations for the spike trains
-    neuroID, richtung, trial, spiketrain as list'''
-    
+    neuroID, direction, trial, spiketrain as list'''
     
     input_list = []
     input_list.append(p.Population(1, cellclass=p.SpikeSourceArray))
@@ -48,6 +63,8 @@ def create_input_list():
     return input_list
 
 def set_input_list(input_list, direction, trial_id):
+    '''load spike train times from data'''
+  
     input_list[0].set('spike_times', get_sorted_spike_train(0, direction, trial_id))
     input_list[1].set('spike_times', get_sorted_spike_train(1, direction, trial_id))
     input_list[2].set('spike_times', get_sorted_spike_train(2, direction, trial_id))
@@ -55,14 +72,15 @@ def set_input_list(input_list, direction, trial_id):
     input_list[4].set('spike_times', get_sorted_spike_train(4, direction, trial_id))
 
 def print_weight_list(weight_list):
+    '''output current list of weights'''
+  
     print "weight_list:"
     for i,val in enumerate(weight_list):
         print i,".",val
-
-
-p.setup(timestep = timestep)
-
+        
 def load_data(data_set):
+    '''load data from matlab files'''
+    
     data_list = []
 
     if data_set == 'peak':
@@ -80,8 +98,13 @@ def load_data(data_set):
 
     return data_list
 
+#########INITIALIZATION##############################################################################################
+
+p.setup(timestep = timestep)
+
 data_list = load_data(data_set_config)
 
+#convert data to internal data representation
 data = []
 for list in data_list:
     direction_list = []
@@ -95,7 +118,6 @@ for list in data_list:
             elif data_set_config == 'average':
                 trial_list.append([elem + 1000 for elem in (list['GDFcell'][0][direction][list['GDFcell'][0][direction][:,0] == trial][:,1])])
 
-
 # create direction population
 dir_list = []
 for i in range(0,len(choosen_directions)):
@@ -108,9 +130,7 @@ for elem in dir_list:
 direction_sequence = copy.deepcopy(choosen_directions)
 direction_sequence_sorted = copy.deepcopy(direction_sequence)
 
-count_increase_weight = 0
-count_decrease_weight = 0
-
+#initialize weights and weight counters
 weight_list = []
 for input in range(0,5):
     input_dir_list = []
@@ -123,198 +143,147 @@ weight_count_decreases = pl.zeros_like(weight_list)
 
 #initialize input_list
 input_list = create_input_list()
+
 output_firing_rates = [0] * len(choosen_directions)
 
 all_firing_rates = [[],[],[],[],[],[]]
 average_firing_rates = copy.deepcopy(initial_weights)
 
+#########TRAINING####################################################################################################
+
 flag_projection = True
 proj_list = []
-for trial_id in trial_sequence:
-    #random.shuffle(direction_sequence)
-    for direction_id in direction_sequence:
-        set_input_list(input_list, direction_id, trial_id)
+num_test = 0
+
+while num_test < number_of_training_phases:
+	num_test += 1
+	
+	for trial_id in trial_sequence:
+	    #shuffle sequence of input directions in order to prevent bias
+	    #random.shuffle(direction_sequence)
+	    
+	    for direction_id in direction_sequence:
+		set_input_list(input_list, direction_id, trial_id)
+		
+		input_firing_rates = []
+		for index, input in enumerate(data):
+		    firing_rate = len(input[direction_id][trial_id]) / runtime * 1000.
+		    input_firing_rates.append(firing_rate)
+		    all_firing_rates[index].append(firing_rate)
+
+		#initialize projections if flag_projection is set
+		if(flag_projection):
+		    flag_projection = False
+		    for input_id, input in enumerate(input_list):
+			input_dir_list = []
+			proj_list.append(input_dir_list)
+			for dir_id, dir in enumerate(dir_list):
+			    input_dir_list.append(p.Projection(input,dir, target="excitatory", method=p.AllToAllConnector()))
+			    input_dir_list[-1].setWeights(weight_list[input_id][dir_id])
+		#load data for the projections
+		else:
+		    for input_id, input in enumerate(input_list):
+			for dir_id, dir in enumerate(dir_list):
+			    proj_list[input_id][dir_id].setWeights(weight_list[input_id][dir_id])
+		
+		#run for runtime ms
+		p.run(runtime)
+		
+		#compute output firing rates
+		output_firing_rates = []
+		for i,elem in enumerate(dir_list):
+		    output_firing_rates.append(len(elem.getSpikes() / runtime * 1000.))
+		    
+		dPrint('input firing rates: ' + str(input_firing_rates))
+		dPrint('output firing rates: ' + str(output_firing_rates))
+		if debug:
+		   print_weight_list(weight_list)
+
+		id =  direction_sequence_sorted.index(direction_id)
+		highest_output_index = output_firing_rates.index(max(output_firing_rates))
+		
+		dPrint("Direction: " + str(direction_sequence_sorted.index(direction_id)))
+		dPrint("Prediction: " + str(highest_output_index))
+
+		dPrint("============================ resetting weights ============================")
+		
+		#iterate over input neurons
+		for input_id, weight in enumerate(weight_list):
+		  
+		    #compute firing rate and deviation from mean of current input neuron
+		    firing_rate = input_firing_rates[input_id]
+		    value = firing_rate - average_firing_rates[input_id]
+		    
+		    #set limit for weight changes
+		    value += weight_change_limit
+		    
+		    #only change weights if firing rate > average + weight_change_limit
+		    if value > 0:
+			#if prediction of current output neuron is correct
+			if id == highest_output_index:
+			    for syn_id, synapse in enumerate(weight):
+				#increase synapse weight to correct output neuron
+				if syn_id == highest_output_index:
+				    weightchange = value * maxchange
+				    newWeight = weight[syn_id] + weightchange
+				    if debug:
+				      weight_count_increases[input_id][syn_id] += weightchange
+				#decrease synapse weight to incorrect output neurons
+				else:
+				    weightchange = -0.2 * value * maxchange
+				    newWeight = weight[syn_id] + weightchange
+				    if debug:
+				      weight_count_decreases[input_id][syn_id] += weightchange
+				#check if new weight is within limits
+				if newWeight > weight_limit_min and newWeight < weight_limit_max:
+				    weight[syn_id] = newWeight
+			else:
+			    for syn_id, synapse in enumerate(weight):
+				if syn_id == highest_output_index:
+				    weightchange = -2.0 * value * maxchange
+				    newWeight = weight[syn_id] + weightchange
+				    if debug:
+				      weight_count_increases[input_id][syn_id] += weightchange
+				else:
+				    weightchange = 0.5 * value * maxchange
+				    newWeight = weight[syn_id] + weightchange
+				    if debug:
+				      weight_count_decreases[input_id][syn_id] += weightchange
+				if newWeight > weight_limit_min and newWeight < weight_limit_max:
+				    weight[syn_id] = newWeight
+
+		#compute average firing rate over all trials and directions per neuron
+		for index, input in enumerate(data):
+		    average_firing_rates[index] = np.mean(all_firing_rates[index])    
+		
+		if not debug:
+		  print ('.'),
+		  sys.stdout.flush()
+		    
+		p.reset()
+		
+print()
         
-        input_firing_rates = []
-        for index, input in enumerate(data):
-            firing_rate = len(input[direction_id][trial_id]) / runtime * 1000.
-            input_firing_rates.append(firing_rate)
-            all_firing_rates[index].append(firing_rate)
-#            print "Trial: ", trial_id
-#            print "Direction: ", direction_id
-#            print "Firing rate: ", input_firing_rates[-1]
+print("============================ training results ============================")
+print "weight list:"
+print_weight_list(weight_list)
 
-        if(flag_projection):
-            flag_projection = False
-#            proj_list = []
-            for input_id, input in enumerate(input_list):
-                input_dir_list = []
-                proj_list.append(input_dir_list)
-                for dir_id, dir in enumerate(dir_list):
-                    input_dir_list.append(p.Projection(input,dir, target="excitatory", method=p.AllToAllConnector()))
-                    #weight_list von vorherigem durchlauf wird geladen
-                    input_dir_list[-1].setWeights(weight_list[input_id][dir_id])
-#            print "weight_list:"
-#            for i,val in enumerate(weight_list):
-#                print i,".",val
-#     
-        else:
-            for input_id, input in enumerate(input_list):
-                for dir_id, dir in enumerate(dir_list):
-                    proj_list[input_id][dir_id].setWeights(weight_list[input_id][dir_id])
-#                    print ("proj_list.getWeights()[%i][%i] = %f" , (input_id,dir_id,proj_list[input_id][dir_id].getWeights()))
-#            print "weight_list:"
-#            for i,val in enumerate(weight_list):
-#                print i,".",val
-        
-        p.run(runtime)
-        
-        #old_output_firing_rates = copy.deepcopy(output_firing_rates)
-        output_firing_rates = []
-#        print "elem.getSpikes()"
-        for i,elem in enumerate(dir_list):
-#            print(elem.getSpikes())
-       #     print "old: ",old_output_firing_rates[i],", ", len(old_output_firing_rates)
-        #    print(len(elem.getSpikes()))
-            #output_firing_rates.append(( len(elem.getSpikes() - old_output_firing_rates[i]) / runtime * 1000.))
-            output_firing_rates.append(len(elem.getSpikes() / runtime * 1000.))
-
-        print "output_firing_rates: ", output_firing_rates
-        
-        mean_fire = pl.average(input_firing_rates)
-        max_fire = max(input_firing_rates)
-        max_diff = max_fire - mean_fire
-        
-        print_weight_list(weight_list)
-
-        id =  direction_sequence_sorted.index(direction_id)
-        print "Direction: ", direction_sequence_sorted.index(direction_id)
-        highest_output_index = output_firing_rates.index(max(output_firing_rates))
-        print 'Prediction: ', highest_output_index
-
-        print("============================ resetting weights ==========")
-        for input_id, weight in enumerate(weight_list):
-            firing_rate = input_firing_rates[input_id]
-            value = firing_rate - average_firing_rates[input_id]
-            value += 1
-            if value > 0:
-                if id == highest_output_index:
-                    for syn_id, synapse in enumerate(weight):
-                        if syn_id == highest_output_index:
-                            newWeight = weight[syn_id] + value * maxchange
-                        else:
-                            newWeight = weight[syn_id] - 0.2 * value * maxchange
-                        if newWeight > 0.001 and newWeight < 1.:
-                            weight[syn_id] = newWeight
-                else:
-                    for syn_id, synapse in enumerate(weight):
-                        if syn_id == highest_output_index:
-                            newWeight = weight[syn_id] - 2.0 * value * maxchange
-                        else:
-                            newWeight = weight[syn_id] + 0.5 * value * maxchange
-                        if newWeight > 0.001 and newWeight < 1.:
-                            weight[syn_id] = newWeight
-
-        input_firing_rates = []
-        for index, input in enumerate(data):
-            average_firing_rates[index] = np.mean(all_firing_rates[index])
-
-        '''
-        print("============================ resetting weights ==========")
-#        print "input_firing_rates", input_firing_rates
-#        print("mean: %f" % mean_fire)
-        # reset the weights for woooooow effect
-        for input_id,input in enumerate(weight_list):
-#            for dir_id, dir in enumerate(input):
-            firing_rate = input_firing_rates[input_id]
-            value = firing_rate - average_firing_rates[input_id]
-            id = direction_sequence_sorted.index(direction_id)
-            prop_weight = get_proportional_weight(mean_fire, firing_rate, max_fire) 
-
-            # uebereinstimmung von input direction mit dem staerksten feuernden output staerken
-            if (highest_output_index == id and value > 0):
-
-                #print 'before :', weight_list[input_id][highest_output_index]
-                #print 'scalingFactor: ', scalingFactors[id]
-                #print 'prop_weight: ', prop_weight
-                #calculation = weight_list[input_id][highest_output_index] + abs(1 * scalingFactors[input_id] * prop_weight)
-                calculation =  weight_list[input_id][highest_output_index] + (1 * 1/(10*average_firing_rates[input_id])) * value
-
-                #print 'after: ', calculation
-                
-                if (calculation < 0. or calculation >= 1.):
-                    continue
-                else:
-                    weight_list[input_id][id] = calculation
-                    weight_count_increases[input_id][id] += weight_list[input_id][id]
-                    count_increase_weight +=1
-            # wenn das am staerksten feuernde output neuron nicht stimmt, senken wir das gewicht
-            elif(highest_output_index != id and value > 0):
-
-                #calculation = weight_list[input_id][highest_output_index] - abs(1 * 1/scalingFactors[input_id] * prop_weight)
-                calculation =  weight_list[input_id][highest_output_index] - 0.001 * 10*average_firing_rates[input_id]
-
-                if (calculation < 0. or calculation >= 1.):
-                    continue
-                else: 
-                    weight_list[input_id][highest_output_index] = calculation
-                    weight_count_decreases[input_id][highest_output_index] -= weight_list[input_id][highest_output_index]
-                    count_decrease_weight += 1
-           '''     
-#
-#        
-        
-#        print("============================ resetting weights ==========")
-##        print "input_firing_rates", input_firing_rates
-##        print("mean: %f" % mean_fire)
-#        # reset the weights for woooooow effect
-#        for input_id,input in enumerate(weight_list):
-#            for dir_id, dir in enumerate(input):
-#                firing_rate = input_firing_rates[input_id]
-#                value = firing_rate - average_firing_rates[input_id]
-##                print("weight_list[%i][%i] = %f" %(input_id,dir_id,weight_list[input_id][dir_id]))
-##                import pdb; pdb.set_trace()
-##                print("input_firing_rates[%i] = %f" % (dir_id,input_firing_rates[input_id]))
-##                print("value = %f" % value)
-##                print "dir_id == direction_id?", dir_id == direction_id
-##                print "value > 0? ", value > 0
-#
-##                import pdb; pdb.set_trace()
-#                if (direction_sequence_sorted[dir_id] == direction_id and value > 0 and weight_list[input_id][dir_id] < 0.99 and weight_list[input_id][dir_id] > 0.002):
-##                    weight_list[input_id][dir_id] += weight_list[input_id][dir_id] * value / 100.
-##                    import pdb; pdb.set_trace()
-#                    weight_list[input_id][dir_id] += get_proportional_weight(mean_fire, firing_rate, max_diff)
-#                    weight_count_increases[input_id][dir_id] += 1
-#                    print("increase weight_list[%i][%i] = %f" %(input_id,dir_id,weight_list[input_id][dir_id]))
-##                    print("increase weight: %f" % weight_list[input_id][dir_id])
-#                    count_increase_weight +=1
-##                    elif(direction_sequence_sorted[dir_id] == direction_id and value < 0 and weight_list[input_id][dir_id] > 0.0002):
-#                elif(direction_sequence_sorted[dir_id] != direction_id and value > 0 and weight_list[input_id][dir_id] > 0.002 and weight_list[input_id][dir_id] < 0.99):
-##                    weight_list[input_id][dir_id] -= weight_list[input_id][dir_id] * value / 200.
-#                    weight_list[input_id][dir_id] += get_proportional_weight(mean_fire, firing_rate, max_diff)
-#                    weight_count_decreases[input_id][dir_id] -= 1
-#                    print("decrease weight_list[%i][%i] = %f" %(input_id,dir_id,weight_list[input_id][dir_id]))
-#                    count_decrease_weight +=1
+if debug:
+  print "weight_count_increases"
+  for i,val in enumerate(weight_count_increases):
+      print i,".",val
+      
+  print "weight_count_decreases"
+  for i,val in enumerate(weight_count_decreases):
+      print i,".",val
+      
+  print "weight_count_changes in total"
+  for i,val in enumerate(weight_count_decreases+weight_count_increases):
+      print i,".",val
+print("============================ /training results ===========================")
 
 
-
-#                print()
-#        print("==========================================================")
-#        print "direction_id: ", direction_id
-#        print "resulting output firing rates: ", output_firing_rates
-         
-#        print firing_rates
-        
-        p.reset()
-        
-print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-print "weight_list: " , weight_list
-print "count_increase_weight: ", count_increase_weight
-print "count_decrease_weight: ", count_decrease_weight
-
-
-####################################################################################
-# test data
+#########TEST########################################################################################################
 
 count_positives = 0.
 count_negatives = 0.
@@ -324,60 +293,37 @@ flag_projection = True
 for trial_id in test_sequence:
 
     direction_sequence = copy.deepcopy(choosen_directions)
-
-    #random.shuffle(direction_sequence)
+    random.shuffle(direction_sequence)
+    
     for direction_id in direction_sequence:
-#        print direction_id, ", ", trial_id
         set_input_list(input_list, direction_id, trial_id)
-        print "#############################################"
+        print('============================ testing weights ============================')
+        
         input_firing_rates = []
+        input_spike_trains = []
         for input in data:
             input_firing_rates.append(len(input[direction_id][trial_id]) / runtime * 1000.)
-#            print "Trial: ", trial_id
-#            print "Direction: ", direction_id
-#            print "Firing rate: ", input_firing_rates[-1]
+            input_spike_trains.append(input[direction_id][trial_id])
 
-#        if(flag_projection):
-#            flag_projection = False
-##            proj_list = []
-#            for input_id, input in enumerate(input_list):
-#                input_dir_list = []
-#                proj_list.append(input_dir_list)
-#                for dir_id, dir in enumerate(dir_list):
-#                    input_dir_list.append(p.Projection(input,dir, target="excitatory", method=p.AllToAllConnector()))
-#                    #weight_list von traingsdurchlauf wird geladen
-#                    input_dir_list[-1].setWeights(weight_list[input_id][dir_id])
-#                    proj_list[input_id][dir_id].setWeights(weight_list[input_id][dir_id])
-
-#        else:
-        for input_id, input in enumerate(input_list):
-            for dir_id, dir in enumerate(dir_list):
-                proj_list[input_id][dir_id].setWeights(weight_list[input_id][dir_id])
-
-
-#                    print ("proj_list.getWeights()[%i][%i] = %f" , (input_id,dir_id,proj_list[input_id][dir_id].getWeights()))
-#            print "weight_list:"
-#            for i,val in enumerate(weight_list):
-#                print i,".",val
-        
+	#run for runtime ms
         p.run(runtime)
         
-        #old_output_firing_rates = copy.deepcopy(output_firing_rates)
         output_firing_rates = []
-
+        output_spike_trains = []
         for i,elem in enumerate(dir_list):
-        ##    output_firing_rates.append(( len(elem.getSpikes() - old_output_firing_rates[i]) / runtime * 1000.))
             output_firing_rates.append(len(elem.getSpikes() / runtime * 1000.))
+            output_spike_trains.append(elem.getSpikes())
+            
+        #visualize
+        visualization.paint_network(False, input_spike_trains, output_spike_trains, '../output/' + data_set_config + '_' + str(choosen_directions) + '_test_network_trial'+str(trial_id)+'_direction_'+str(direction_id) + '.png',True, trial_id, direction_id+1,choosen_directions)    
 
-        print "input direction_id: ", direction_id
+        prediction = direction_sequence_sorted[output_firing_rates.index(max(output_firing_rates))]
+
         print "input firing rates: ", input_firing_rates
         print "resulting output firing rates: ", output_firing_rates
-        print "max: ", max(output_firing_rates)
-        print "index: ", output_firing_rates.index(max(output_firing_rates))
-        print "direction_sequence: " , direction_sequence_sorted
-        prediction = direction_sequence_sorted[output_firing_rates.index(max(output_firing_rates))]
+        print "input direction_id: ", direction_id
         print "prediction: " , prediction
-        # fehler: vertauscht hier irgendwie noch was mit den indizes ?!
+
         if(prediction == direction_id):
             count_positives += 1.
         else:
@@ -385,23 +331,13 @@ for trial_id in test_sequence:
         count_test_inputs += 1.
         p.reset()
     
+print('')
+print("============================ test results ===========================")
 print "number of test inputs: ", count_test_inputs
 print "number of positives: ", count_positives
 print "number of negatives: ", count_negatives
 print "positive predictions: ", count_positives /count_test_inputs * 100., " %"
+print("============================ /test results ==========================")
 
-print_weight_list(weight_list)
-      
-print "weight_count_increases"
-for i,val in enumerate(weight_count_increases):
-    print i,".",val
-    
-print "weight_count_decreases"
-for i,val in enumerate(weight_count_decreases):
-    print i,".",val
-    
-print "weight_count_changes in total"
-for i,val in enumerate(weight_count_decreases+weight_count_increases):
-    print i,".",val
 
-print average_firing_rates
+
